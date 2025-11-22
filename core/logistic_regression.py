@@ -5,7 +5,7 @@ import numpy as np
 class LogisticRegressionModel:
     """Classe pour le modèle de régression logistique"""
     
-    def __init__(self, random_state: int = 42, max_iter: int = 1000):
+    def __init__(self, random_state: int = 42, max_iter: int = 1010):
         """
         Initialise le modèle de régression logistique
         
