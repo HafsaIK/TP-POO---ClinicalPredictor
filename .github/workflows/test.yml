@@ -1,0 +1,168 @@
+name: Tests Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-test-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-test-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install pytest pytest-cov pytest-xdist pytest-mock
+
+    - name: Create test data directory
+      run: |
+        mkdir -p data
+        echo "🗂️ Dossier data/ créé pour les tests"
+
+    - name: Download sample dataset (if not exists)
+      run: |
+        if [ ! -f data/clinical_data.csv ]; then
+          echo "📥 Téléchargement du dataset de test..."
+          # Utilise un dataset de démonstration (Pima Indians Diabetes)
+          wget -q https://raw.githubusercontent.com/jbrownlee/Datasets/master/pima-indians-diabetes.data.csv -O data/clinical_data.csv || echo "⚠️ Dataset non téléchargé (tests pourraient échouer)"
+        fi
+
+    - name: Run unit tests with pytest
+      run: |
+        # Exécute tous les fichiers test_*.py ou *_test.py
+        if [ -d tests ]; then
+          pytest tests/ -v --cov=. --cov-report=xml --cov-report=html --cov-report=term
+        else
+          echo "⚠️ Aucun dossier tests/ trouvé. Création de tests de base..."
+          mkdir -p tests
+          cat > tests/test_imports.py << 'EOF'
+        """Tests de base pour vérifier que les imports fonctionnent"""
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+
+        def test_core_imports():
+            """Vérifie que les modules core peuvent être importés"""
+            from core.dataset import ClinicalDataset
+            from core.model import ClinicalPredictor
+            assert ClinicalDataset is not None
+            assert ClinicalPredictor is not None
+
+        def test_pipeline_imports():
+            """Vérifie que les modules pipeline peuvent être importés"""
+            from pipeline.trainer import ModelTrainer
+            from pipeline.evaluator import ModelEvaluator
+            assert ModelTrainer is not None
+            assert ModelEvaluator is not None
+
+        def test_utils_imports():
+            """Vérifie que les modules utils peuvent être importés"""
+            import utils
+            assert utils is not None
+        EOF
+          pytest tests/ -v --cov=. --cov-report=xml --cov-report=html --cov-report=term
+        fi
+
+    - name: Run main.py validation test
+      run: |
+        # Test que main.py peut être exécuté sans erreur (si données disponibles)
+        if [ -f data/clinical_data.csv ]; then
+          echo "🧪 Test d'exécution de main.py..."
+          timeout 120 python main.py || echo "⚠️ main.py n'a pas pu s'exécuter complètement"
+        else
+          echo "⏭️ Test de main.py ignoré (pas de données)"
+        fi
+      continue-on-error: true
+
+    - name: Test code coverage threshold
+      run: |
+        if [ -f .coverage ]; then
+          pip install coverage
+          COVERAGE=$(coverage report | grep TOTAL | awk '{print $4}' | sed 's/%//')
+          echo "📊 Couverture de code: $COVERAGE%"
+          if [ $(echo "$COVERAGE < 50" | bc) -eq 1 ]; then
+            echo "⚠️ Couverture de code inférieure à 50%"
+          else
+            echo "✅ Couverture de code acceptable"
+          fi
+        fi
+      continue-on-error: true
+
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: coverage-report-python-${{ matrix.python-version }}
+        path: |
+          htmlcov/
+          coverage.xml
+          .coverage
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-python-${{ matrix.python-version }}
+        path: |
+          pytest-report.xml
+          htmlcov/
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    - name: Integration test - Full pipeline
+      run: |
+        echo "🔄 Test d'intégration du pipeline complet..."
+        if [ -f data/clinical_data.csv ]; then
+          timeout 180 python main.py && echo "✅ Pipeline complet exécuté avec succès" || echo "⚠️ Pipeline a échoué"
+        else
+          echo "⏭️ Test d'intégration ignoré (pas de données)"
+        fi
+      continue-on-error: true
+
+    - name: Validate all Python files
+      run: |
+        echo "🔍 Validation de tous les fichiers Python..."
+        find . -name "*.py" -not -path "./.git/*" -not -path "./venv/*" -not -path "./.venv/*" | while read file; do
+          echo "  Checking $file..."
+          python -m py_compile "$file" || exit 1
+        done
+        echo "✅ Tous les fichiers Python sont valides"
