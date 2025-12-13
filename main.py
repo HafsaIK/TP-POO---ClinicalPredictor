@@ -2,61 +2,70 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from core.dataset import ClinicalDataset
-from core.model import ClinicalPredictor
+from pipeline.builder import VirusModelBuilder
 from pipeline.trainer import ModelTrainer
-from pipeline.evaluator import ModelEvaluator
+
 
 def main():
     print("="*70)
     print("🏥 CLINICAL PREDICTOR - SYSTÈME DE DIAGNOSTIC DIABÈTE")
     print("="*70)
+    print("\n✨ Démonstration du Design Pattern Builder\n")
     
-    # 1. Chargement des données
-    print("\n📊 ÉTAPE 1: CHARGEMENT DES DONNÉES")
-    print("-" * 70)
-    dataset = ClinicalDataset('data/clinical_data.csv')
-    data = dataset.load_data()
+    # =========================================================================
+    # MÉTHODE 1 : Utilisation de la méthode factory (RECOMMANDÉE - Plus simple)
+    # =========================================================================
+    print("📌 MÉTHODE 1 : Utilisation de la méthode factory ModelTrainer")
+    print("="*70)
+    print("Code utilisé :")
+    print(">>> system = ModelTrainer.build_diagnostic_system(")
+    print("...     'data/clinical_data.csv',")
+    print("...     model_type='random_forest',")
+    print("...     n_estimators=100,")
+    print("...     max_depth=10")
+    print("... )")
+    print()
     
-    target_column = 'Outcome'
-    print(f"🎯 Colonne cible: '{target_column}' (0=Sain, 1=Diabétique)")
+    # Construction simple avec la méthode factory
+    system = ModelTrainer.build_diagnostic_system(
+        'data/clinical_data.csv',
+        model_type='random_forest',
+        n_estimators=100,
+        max_depth=10
+    )
     
-    dataset.split_features_target(target_column=target_column)
+    # =========================================================================
+    # MÉTHODE 2 : Utilisation directe du Builder (Pour plus de contrôle)
+    # =========================================================================
+    print("\n📌 MÉTHODE 2 : Utilisation directe du VirusModelBuilder")
+    print("="*70)
+    print("Code utilisé :")
+    print(">>> system2 = (VirusModelBuilder()")
+    print("...     .set_data_source('data/clinical_data.csv')")
+    print("...     .set_preprocessing_params(test_size=0.2)")
+    print("...     .set_model_type('logistic_regression', max_iter=1000)")
+    print("...     .build_and_train()")
+    print("...     .get_diagnostic_system()")
+    print("... )")
+    print()
     
-    # 2. Prétraitement
-    print("\n🔧 ÉTAPE 2: PRÉTRAITEMENT DES DONNÉES")
-    print("-" * 70)
+    # Construction avec le Builder pour comparaison
+    system2 = (VirusModelBuilder()
+        .set_data_source('data/clinical_data.csv', target_column='Outcome')
+        .set_preprocessing_params(test_size=0.2, random_state=42)
+        .set_model_type('logistic_regression', max_iter=1000)
+        .build_and_train()
+        .get_diagnostic_system()
+    )
     
-    X_train, X_test, y_train, y_test = dataset.get_train_test_split(test_size=0.2)
-    print(f"✓ Train set: {X_train.shape[0]} patients")
-    print(f"✓ Test set:  {X_test.shape[0]} patients")
+    # =========================================================================
+    # UTILISATION DU SYSTÈME DE DIAGNOSTIC
+    # =========================================================================
+    print("\n🏥 DIAGNOSTIC CLINIQUE")
+    print("="*70)
     
-    # Remplacer les 0 biologiquement impossibles
-    zero_columns = ['Glucose', 'BloodPressure', 'SkinThickness', 'Insulin', 'BMI']
-    X_train = dataset.replace_zeros(X_train, zero_columns)
-    X_test = dataset.replace_zeros(X_test, zero_columns)
-    
-    # Normalisation
-    X_train_scaled, X_test_scaled = dataset.normalize_features(X_train, X_test)
-    
-    # 3. Entraînement
-    print("\n🎯 ÉTAPE 3: ENTRAÎNEMENT DU MODÈLE")
-    print("-" * 70)
-    trainer = ModelTrainer(model_type='random_forest')
-    trainer.create_model(n_estimators=100, max_depth=10, random_state=42)
-    trainer.train(X_train_scaled, y_train)
-    
-    # 4. Évaluation
-    print("\n📈 ÉTAPE 4: ÉVALUATION DU MODÈLE")
-    print("-" * 70)
-    trained_model = trainer.get_trained_model()
-    evaluator = ModelEvaluator(trained_model)
-    metrics = evaluator.evaluate(X_test_scaled, y_test)
-    
-    # 5. Utilisation du ClinicalPredictor
-    print("\n🏥 ÉTAPE 5: DIAGNOSTIC CLINIQUE")
-    print("-" * 70)
-    predictor = ClinicalPredictor(trained_model)
+    # Récupérer les données de test
+    X_test_scaled, y_test = system.get_test_data()
     
     # Test sur 5 patients aléatoires
     print("\n🔬 Test sur des patients du dataset de test:\n")
@@ -64,8 +73,7 @@ def main():
         patient_data = X_test_scaled[i]
         real_diagnosis = "Diabétique" if y_test.iloc[i] == 1 else "Sain"
         
-        diagnosis = predictor.diagnose(patient_data)
-        diagnosis_proba = predictor.diagnose_proba(patient_data)
+        diagnosis_proba = system.diagnose_with_probability(patient_data)
         
         print(f"Patient #{i+1}:")
         print(f"   Diagnostic prédit: {diagnosis_proba['diagnostic']}")
@@ -75,14 +83,49 @@ def main():
               else f"   ✗ Incorrect")
         print()
     
-    # Test interactif (optionnel)
-    print("\n" + "="*70)
-    print("💡 Le système est prêt pour des diagnostics en temps réel!")
+    # =========================================================================
+    # COMPARAISON DES DEUX SYSTÈMES
+    # =========================================================================
+    print("\n📊 COMPARAISON DES MÉTRIQUES")
     print("="*70)
-    print("\nExemple d'utilisation du ClinicalPredictor:")
-    print(">>> patient = [6, 148, 72, 35, 0, 33.6, 0.627, 50]")
-    print(">>> predictor.diagnose_proba(patient)")
-    print("={'diagnostic': 'Infecté', 'probabilite': 0.75, 'confiance': '75.00%'}")
+    
+    metrics1 = system.get_metrics()
+    metrics2 = system2.get_metrics()
+    
+    print(f"\n{'Méthode':<30} {'Model':<20} {'Accuracy':<12} {'F1-Score':<12}")
+    print("-" * 70)
+    print(f"{'Factory Method':<30} {'Random Forest':<20} {metrics1['accuracy']:<12.4f} {metrics1['f1_score']:<12.4f}")
+    print(f"{'Builder Direct':<30} {'Log. Regression':<20} {metrics2['accuracy']:<12.4f} {metrics2['f1_score']:<12.4f}")
+    
+    # =========================================================================
+    # RÉSUMÉ ET RECOMMANDATIONS
+    # =========================================================================
+    print("\n" + "="*70)
+    print("💡 RÉSUMÉ DES DEUX APPROCHES")
+    print("="*70)
+    
+    print("\n✨ Méthode Factory (ModelTrainer.build_diagnostic_system):")
+    print("   ✓ Plus simple - une seule ligne")
+    print("   ✓ Paramètres par défaut intelligents")
+    print("   ✓ Idéal pour les cas d'usage standards")
+    print("   ✓ Recommandé pour débutants")
+    
+    print("\n🔧 Builder Direct (VirusModelBuilder):")
+    print("   ✓ Contrôle total sur chaque étape")
+    print("   ✓ Configuration personnalisée")
+    print("   ✓ Idéal pour cas complexes")
+    print("   ✓ Recommandé pour utilisateurs avancés")
+    
+    print("\n📝 Exemple d'utilisation recommandée:")
+    print("   >>> from pipeline.trainer import ModelTrainer")
+    print("   >>> system = ModelTrainer.build_diagnostic_system(")
+    print("   ...     'data/clinical_data.csv',")
+    print("   ...     model_type='random_forest',")
+    print("   ...     n_estimators=100")
+    print("   ... )")
+    print("   >>> result = system.diagnose_with_probability(patient_data)")
+    print("   >>> print(result)")
+
 
 if __name__ == "__main__":
     main()
